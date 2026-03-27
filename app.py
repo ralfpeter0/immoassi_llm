@@ -63,11 +63,18 @@ def _is_state_empty(state: dict) -> bool:
 
 
 def _is_state_complete(state: dict) -> bool:
+    intent = state.get("intent")
+    if intent == "mieter_info":
+        return state.get("intent") is not None and state.get("mieter") is not None
+
     required = ["intent", "mieter", "zeitraum", "zahlungsart"]
     return all(state.get(key) is not None for key in required)
 
 
 def _next_question(state: dict) -> str:
+    if state.get("intent") == "mieter_info" and state.get("mieter") is None:
+        return "Für welchen Mieter?"
+
     missing_zeitraum = state.get("zeitraum") is None
     missing_zahlungsart = state.get("zahlungsart") is None
 

@@ -18,10 +18,12 @@ class QueryEngine:
         self.llm = llm or EchoLLM()
         self.df_ist_soll = pd.DataFrame()
         self.df_zahlung = pd.DataFrame()
+        self.df_mietmatrix = pd.DataFrame()
 
     def load(self) -> None:
         ist_soll_path = DATAOUT_DIR / "miete_ist_soll.csv"
         zahlung_path = DATAOUT_DIR / "tbl_zahlung_mit_mieter.csv"
+        mietmatrix_path = DATAOUT_DIR / "mietmatrix.csv"
 
         if ist_soll_path.exists():
             self.df_ist_soll = pd.read_csv(ist_soll_path)
@@ -34,6 +36,12 @@ class QueryEngine:
             print(f"[query_engine] geladen: {zahlung_path}")
         else:
             print(f"[query_engine] fehlt: {zahlung_path}")
+
+        if mietmatrix_path.exists():
+            self.df_mietmatrix = pd.read_csv(mietmatrix_path)
+            print(f"[query_engine] geladen: {mietmatrix_path}")
+        else:
+            print(f"[query_engine] fehlt: {mietmatrix_path}")
 
     def ask(self, question: str) -> str:
         llm_response = self.llm.generate(question)
@@ -123,6 +131,31 @@ def _filter_mieter(df: pd.DataFrame, mieter: str | None) -> pd.DataFrame:
 def execute_query(dialog_state: dict):
     engine = _get_engine()
     intent = dialog_state.get("intent")
+
+    if intent == "mieter_info":
+        df = engine.df_mietmatrix.copy()
+        mieter = dialog_state.get("mieter")
+
+        if mieter and not df.empty:
+            left = df.get("mieter_name_1", pd.Series(index=df.index, dtype=object))
+            right = df.get("mieter_name_2", pd.Series(index=df.index, dtype=object))
+            df = df[
+                left.astype(str).str.contains(mieter, case=False, na=False)
+                | right.astype(str).str.contains(mieter, case=False, na=False)
+            ]
+
+        required_cols = [
+            "mieter_name_1",
+            "mieter_name_2",
+            "einheit",
+            "wohnung",
+            "objekt",
+        ]
+        for col in required_cols:
+            if col not in df.columns:
+                df[col] = ""
+
+        return df[required_cols]
 
     if intent == "sum_miete":
         df = engine.df_zahlung.copy()
