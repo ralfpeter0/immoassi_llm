@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pandas as pd
 
@@ -35,6 +36,19 @@ class QueryEngine:
             print(f"[query_engine] fehlt: {zahlung_path}")
 
     def ask(self, question: str) -> str:
+        llm_response = self.llm.generate(question)
+
+        try:
+            payload = json.loads(llm_response)
+        except json.JSONDecodeError:
+            payload = {
+                "need_clarification": False,
+                "question": "",
+            }
+
+        if payload.get("need_clarification"):
+            return str(payload.get("question") or "Bitte präzisiere deine Anfrage.")
+
         q = question.lower().strip()
 
         if "offen" in q and not self.df_ist_soll.empty and "diff" in self.df_ist_soll.columns:
@@ -44,4 +58,4 @@ class QueryEngine:
         if "zahlung" in q and not self.df_zahlung.empty:
             return f"Geladene Zahlungen: {len(self.df_zahlung)}"
 
-        return self.llm.generate(question)
+        return llm_response
