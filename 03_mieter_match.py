@@ -1,305 +1,217 @@
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
 import pandas as pd
 from rapidfuzz import fuzz
-from pathlib import Path
-import re
 
 from core.data_loader import get_mietkonten
 
-KONTO_MAP = {"8403": "8401"}
-STOPWORDS = {"KG", "GMBH", "UND", "DER", "DIE", "DAS", "MBH"}
+FUZZY_THRESHOLD = 85
 
-# --------------------------------------------------
-# Pfade
-# --------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
 INPUT_DIR = BASE_DIR / "dataout"
 OUTPUT_DIR = BASE_DIR / "dataout"
-
-# --------------------------------------------------
-# Mietkonten-Filter aus konto_mapping.csv laden
-# Fallback: hardcodierte Menge, falls Datei leer/fehlt
-# --------------------------------------------------
-_MIETKONTEN_FALLBACK = {"8105", "8195", "8115", "8197", "8400", "8401", "8402", "8403"}
-
-def _load_mietkonten_filter() -> set:
-    konten = get_konto_set(load_konto_mapping())
-    if konten:
-        print(f"Mietkonten aus konto_mapping.csv geladen: {sorted(konten)}")
-        return konten
-    print("konto_mapping.csv leer oder fehlt – Fallback auf hardcodierte Konten.")
-    return _MIETKONTEN_FALLBACK
-
-MIETKONTEN_FILTER = get_mietkonten()
-
 OUTPUT_DIR.mkdir(exist_ok=True)
 
-# --------------------------------------------------
-# CSV laden (nur Komma!)
-# --------------------------------------------------
-def load_csv(path):
-    last_error = None
-    for enc in ("utf-8", "cp1252", "latin1"):
+
+def load_csv(path: Path) -> pd.DataFrame:
+    for encoding in ("utf-8-sig", "utf-8", "cp1252", "latin1"):
         try:
-            return pd.read_csv(path, sep=",", dtype=str, encoding=enc)
-        except UnicodeDecodeError as exc:
-            last_error = exc
-    if last_error:
-        raise last_error
-    return pd.read_csv(path, sep=",", dtype=str)
+            return pd.read_csv(path, sep=None, engine="python", dtype=str, encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+    return pd.read_csv(path, sep=None, engine="python", dtype=str)
 
-# --------------------------------------------------
-# Hilfsfunktion
-# --------------------------------------------------
-def col(df, name):
-    cols = {c.lower(): c for c in df.columns}
-    if name.lower() in cols:
-        return cols[name.lower()]
-    raise Exception(f"Spalte nicht gefunden: {name} | vorhanden: {list(df.columns)}")
 
-# --------------------------------------------------
-# Textbereinigung
-# --------------------------------------------------
-def normalize(text):
-    if text is None:
-        return ""
-    text = str(text)
-    text = text.upper()
+def normalize_text(value: str) -> str:
+    text = str(value or "").strip().upper()
     text = text.replace("Ä", "AE").replace("Ö", "OE").replace("Ü", "UE").replace("ß", "SS")
-    text = re.sub(r"[^A-Z ]", " ", text)
+    text = re.sub(r"[^A-Z0-9 ]", " ", text)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-def normalize_konto(value):
-    text = str(value or "").strip()
-    if text.lower() in {"nan", "none"}:
+def normalize_konto(value: str) -> str:
+    konto = str(value or "").strip()
+    if konto.lower() in {"", "nan", "none"}:
         return ""
-    return text
+    return konto
 
 
-def choose_zahlungskonto(row):
-    sollkonto = normalize_konto(row.get("sollkonto"))
-    habenkonto = normalize_konto(row.get("habenkonto"))
-    if sollkonto in MIETKONTEN_FILTER:
-        konto = sollkonto
-    elif habenkonto in MIETKONTEN_FILTER:
-        konto = habenkonto
-    else:
-        konto = sollkonto or habenkonto
-    return KONTO_MAP.get(konto, konto)
+def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    out = df.copy()
+    out.columns = [c.strip().lower() for c in out.columns]
+    return out
 
 
-def build_tokens_extended(text):
-    tokens = normalize(text).split()
-    tokens = [t for t in tokens if len(t) >= 4 and t not in STOPWORDS]
-    tokens_extended = tokens + [tokens[i] + " " + tokens[i + 1] for i in range(len(tokens) - 1)]
-    return tokens, tokens_extended
+def build_mieter_candidates(tbl_mieter: pd.DataFrame) -> pd.DataFrame:
+    rows: list[dict[str, str]] = []
 
-
-def build_mieter_candidates(tbl_mieter):
-    if tbl_mieter.empty:
-        return pd.DataFrame(columns=["mieterid", "candidate"])
-
-    mieter = tbl_mieter.copy()
-    mieter["mieterid"] = mieter.get("mieterid", "").fillna("").astype(str).str.strip()
-    mieter["mieter_name"] = mieter.get("mieter_name", "").fillna("").astype(str)
-    mieter["laden"] = mieter.get("laden", "").fillna("").astype(str)
-    mieter = mieter[mieter["mieterid"].ne("")]
-    mieter = mieter[~mieter["mieterid"].str.lower().isin({"nan", "none"})]
-
-    candidates = []
-    for _, row in mieter.iterrows():
-        mieterid = row["mieterid"]
-        for source in ("mieter_name", "laden"):
-            candidate = normalize(row.get(source, ""))
-            if candidate:
-                candidates.append({"mieterid": mieterid, "candidate": candidate})
-
-    return pd.DataFrame(candidates).drop_duplicates()
-
-
-def collect_mieter_matches(tokens_extended, mieter_candidates, threshold=85):
-    matches = {}
-    if not tokens_extended or mieter_candidates.empty:
-        return matches
-
-    for token in tokens_extended:
-        for _, row in mieter_candidates.iterrows():
-            candidate = row["candidate"]
-            score = fuzz.partial_ratio(token, candidate)
-            if score >= threshold:
-                mieterid = row["mieterid"]
-                score = round(float(score), 2)
-                if mieterid not in matches or score > matches[mieterid]:
-                    matches[mieterid] = score
-    return matches
-
-
-def select_mieter_match(matches):
-    if not matches:
-        return None, "none", 0.0, 0
-
-    if len(matches) == 1:
-        selected_mieterid = next(iter(matches))
-        return selected_mieterid, "fuzzy", matches[selected_mieterid], 1
-
-    selected_mieterid = max(matches, key=matches.get)
-    selected_score = matches[selected_mieterid]
-    return selected_mieterid, "fuzzy", selected_score, len(matches)
-
-
-def mieter_vertrag_kandidaten(mietmatrix):
-    matrix = mietmatrix.copy()
-    matrix["vertragid"] = matrix.get("vertragid", "").fillna("").astype(str).str.strip()
-    matrix["konto"] = matrix.get("konto", "").map(normalize_konto)
-    if "mieterid" in matrix.columns:
-        matrix["mieterid"] = matrix["mieterid"].fillna("").astype(str).str.strip()
-        out = matrix[["mieterid", "vertragid", "konto"]]
-    else:
-        left = matrix[["mieterid_1", "vertragid", "konto"]].rename(columns={"mieterid_1": "mieterid"})
-        right = matrix[["mieterid_2", "vertragid", "konto"]].rename(columns={"mieterid_2": "mieterid"})
-        out = pd.concat([left, right], ignore_index=True)
-
-    out["mieterid"] = out["mieterid"].fillna("").astype(str).str.strip()
-    out = out[out["mieterid"].ne("")]
-    out = out[~out["mieterid"].str.lower().isin({"nan", "none"})]
-    out = out[out["vertragid"].ne("")]
-    return out.drop_duplicates()
-
-
-# --------------------------------------------------
-# Matching Vertrag
-# --------------------------------------------------
-def match_vertrag(zahlungen, mietmatrix, tbl_mieter):
-
-    c_text = col(zahlungen, "buchungstext")
-    c_betrag = col(zahlungen, "betrag")
-    c_datum = col(zahlungen, "datum")
-
-    mieter_candidates = build_mieter_candidates(tbl_mieter)
-    vertrag_candidates = mieter_vertrag_kandidaten(mietmatrix)
-
-    results = []
-
-    for _, row in zahlungen.iterrows():
-        zahlung_konto = choose_zahlungskonto(row)
-        tokens, tokens_extended = build_tokens_extended(row.get(c_text, ""))
-        raw_matches = collect_mieter_matches(tokens_extended, mieter_candidates, threshold=85)
-        print("TOKENS:", tokens)
-        print("MATCHES:", raw_matches)
-        mieterid_match, match_typ, match_score, anzahl_treffer = select_mieter_match(raw_matches)
-
-        result = {
-            "datum": row.get(c_datum),
-            "betrag": row.get(c_betrag),
-            "buchungstext": row.get(c_text),
-            "zahlung_konto": zahlung_konto,
-            "mieterid_match": mieterid_match or "",
-            "vertragid": None,
-            "match_typ": match_typ,
-            "match_score": match_score,
-            "anzahl_treffer": anzahl_treffer,
-        }
-
-        if not mieterid_match:
-            results.append(result)
+    for _, row in tbl_mieter.iterrows():
+        mieterid = normalize_konto(row.get("mieterid"))
+        if not mieterid:
             continue
 
-        mieter_vertraege = vertrag_candidates[vertrag_candidates["mieterid"] == mieterid_match]
-        vertragsliste = sorted(mieter_vertraege["vertragid"].drop_duplicates().tolist())
+        for source in ("mieter_name", "laden"):
+            candidate = normalize_text(row.get(source, ""))
+            if len(candidate) < 3:
+                continue
 
-        if len(vertragsliste) == 1:
-            result["vertragid"] = vertragsliste[0]
-        elif len(vertragsliste) > 1 and zahlung_konto:
-            konto_matches = mieter_vertraege[mieter_vertraege["konto"] == zahlung_konto]
-            konto_vertraege = sorted(konto_matches["vertragid"].drop_duplicates().tolist())
-            if len(konto_vertraege) == 1:
-                result["vertragid"] = konto_vertraege[0]
+            rows.append({"mieterid": mieterid, "candidate": candidate})
 
-        results.append(result)
+            alias = candidate.replace("AE", "A").replace("OE", "O").replace("UE", "U")
+            if alias != candidate and len(alias) >= 3:
+                rows.append({"mieterid": mieterid, "candidate": alias})
 
-    return pd.DataFrame(results)
-
-# --------------------------------------------------
-# MAIN
-# --------------------------------------------------
-def main():
-    print("Lade Daten...")
-
-    zahlungen = pd.read_csv(
-        INPUT_DIR / "tbl_zahlung.csv",
-        sep=",",
-        dtype=str,
-        encoding="utf-8",
-    )
-    print("SPALTEN NACH LOAD:", zahlungen.columns.tolist())
-    if len(zahlungen.columns) == 1:
-        zahlungen = zahlungen.iloc[:, 0].str.split(",", expand=True)
-        zahlungen.columns = [
-            "datum",
-            "betrag",
-            "buchungstext",
-            "zahlung_konto",
-        ]
-    mietmatrix = load_csv(INPUT_DIR / "mietmatrix.csv")
-    mieter_file = INPUT_DIR / "tbl_mieter.csv"
-    if not mieter_file.exists():
-        mieter_file = INPUT_DIR / "Tbl_mieter.csv"
-    tbl_mieter = load_csv(mieter_file)
-
-    # Spalten normalisieren
-    zahlungen.columns = [c.lower().strip() for c in zahlungen.columns]
-    mietmatrix.columns = [c.lower().strip() for c in mietmatrix.columns]
-    tbl_mieter.columns = [c.lower().strip() for c in tbl_mieter.columns]
-
-    # nur relevante Mietkonten berücksichtigen
-    zahlungen["sollkonto_clean"] = zahlungen["sollkonto"].map(normalize_konto)
-    zahlungen["habenkonto_clean"] = zahlungen["habenkonto"].map(normalize_konto)
-    zahlungen = zahlungen[
-        zahlungen["sollkonto_clean"].isin(MIETKONTEN_FILTER)
-        | zahlungen["habenkonto_clean"].isin(MIETKONTEN_FILTER)
-    ].copy()
-    zahlungen = zahlungen.drop(columns=["sollkonto_clean", "habenkonto_clean"])
-
-    print("Spalten zahlung:", zahlungen.columns)
-    print("Spalten mietmatrix:", mietmatrix.columns)
-    print("Spalten mieter:", tbl_mieter.columns)
-
-    # --------------------------------------------------
-    # Schritt 1: Vertrag Matching
-    # --------------------------------------------------
-    df_result = match_vertrag(zahlungen, mietmatrix, tbl_mieter)
-    print("Unmatched:", len(df_result[df_result["match_typ"] == "none"]))
-
-    # --------------------------------------------------
-    # Speichern
-    # --------------------------------------------------
-    df_result = df_result[
-        [
-            "datum",
-            "betrag",
-            "buchungstext",
-            "zahlung_konto",
-            "mieterid_match",
-            "vertragid",
-            "match_typ",
-            "match_score",
-            "anzahl_treffer",
-        ]
-    ]
-    df_result["betrag"] = pd.to_numeric(df_result["betrag"], errors="coerce")
-
-    print("FINAL SPALTEN:", df_result.columns.tolist())
-    print(df_result.head())
-
-    output_file = OUTPUT_DIR / "tbl_zahlung_mit_mieter.csv"
-    df_result.to_csv(output_file, index=False, sep=",", encoding="utf-8")
-
-    print("Fertig:", output_file)
+    result = pd.DataFrame(rows).drop_duplicates()
+    print(f"[03_mieter_match] Mieter-Kandidaten: {len(result)}")
+    return result
 
 
-# --------------------------------------------------
-# Start
-# --------------------------------------------------
+def build_vertrag_candidates(mietmatrix: pd.DataFrame) -> pd.DataFrame:
+    matrix = mietmatrix.copy()
+    matrix["vertragid"] = matrix["vertragid"].map(normalize_konto)
+    matrix["konto"] = matrix["konto"].map(normalize_konto)
+
+    left = matrix[["vertragid", "konto", "mieterid_1"]].rename(columns={"mieterid_1": "mieterid"})
+    right = matrix[["vertragid", "konto", "mieterid_2"]].rename(columns={"mieterid_2": "mieterid"})
+
+    out = pd.concat([left, right], ignore_index=True)
+    out["mieterid"] = out["mieterid"].map(normalize_konto)
+    out = out[(out["mieterid"] != "") & (out["vertragid"] != "")]
+    out = out.drop_duplicates()
+
+    print(f"[03_mieter_match] Vertrag-Kandidaten (mieterid+konto→vertragid): {len(out)}")
+    return out
+
+
+def choose_sachkonto(row: pd.Series, sachkonten: set[str]) -> str:
+    sollkonto = normalize_konto(row.get("sollkonto"))
+    habenkonto = normalize_konto(row.get("habenkonto"))
+
+    # Priorität: Habenkonto (typisch Ertragskonto), dann Sollkonto.
+    if habenkonto in sachkonten:
+        return habenkonto
+    if sollkonto in sachkonten:
+        return sollkonto
+    return ""
+
+
+def select_mieterid(text: str, candidates: pd.DataFrame) -> tuple[str, str, float]:
+    if not text:
+        return "", "none", 0.0
+
+    # 1) Exact: Kandidat als kompletter Ausdruck im Buchungstext
+    exact = candidates[candidates["candidate"].apply(lambda c: c in text)]
+    if not exact.empty:
+        counts = exact.groupby("mieterid").size().sort_values(ascending=False)
+        mieterid = str(counts.index[0])
+        return mieterid, "exact", 100.0
+
+    # 2) Fuzzy über alle Kandidaten
+    best_per_mieter: dict[str, float] = {}
+    for _, row in candidates.iterrows():
+        mieterid = row["mieterid"]
+        candidate = row["candidate"]
+        score = float(fuzz.partial_ratio(text, candidate))
+        if score >= FUZZY_THRESHOLD:
+            if mieterid not in best_per_mieter or score > best_per_mieter[mieterid]:
+                best_per_mieter[mieterid] = score
+
+    if not best_per_mieter:
+        return "", "none", 0.0
+
+    mieterid = max(best_per_mieter, key=best_per_mieter.get)
+    return mieterid, "fuzzy", round(best_per_mieter[mieterid], 2)
+
+
+def determine_vertragid(vertrag_candidates: pd.DataFrame, mieterid: str, konto: str) -> str:
+    if not mieterid:
+        return ""
+
+    subset = vertrag_candidates[vertrag_candidates["mieterid"] == mieterid]
+    if subset.empty:
+        return ""
+
+    if konto:
+        subset_konto = subset[subset["konto"] == konto]
+        unique_konto = sorted(subset_konto["vertragid"].unique().tolist())
+        if len(unique_konto) == 1:
+            return unique_konto[0]
+
+    unique_alle = sorted(subset["vertragid"].unique().tolist())
+    if len(unique_alle) == 1:
+        return unique_alle[0]
+
+    return ""
+
+
+def run_matching(zahlungen: pd.DataFrame, mietmatrix: pd.DataFrame, tbl_mieter: pd.DataFrame) -> pd.DataFrame:
+    sachkonten = {str(k) for k in get_mietkonten()}
+    print(f"[03_mieter_match] Sachkonten für Matching: {sorted(sachkonten)}")
+
+    mieter_candidates = build_mieter_candidates(tbl_mieter)
+    vertrag_candidates = build_vertrag_candidates(mietmatrix)
+
+    output_rows = []
+    for _, row in zahlungen.iterrows():
+        text = normalize_text(row.get("buchungstext", ""))
+        zahlung_konto = choose_sachkonto(row, sachkonten)
+
+        mieterid, match_typ, match_score = select_mieterid(text, mieter_candidates)
+        vertragid = determine_vertragid(vertrag_candidates, mieterid, zahlung_konto)
+
+        output_rows.append(
+            {
+                "datum": row.get("datum", ""),
+                "betrag": row.get("betrag", ""),
+                "buchungstext": row.get("buchungstext", ""),
+                "zahlung_konto": zahlung_konto,
+                "mieterid": mieterid,
+                "vertragid": vertragid,
+                "match_typ": match_typ,
+                "match_score": match_score,
+            }
+        )
+
+    result = pd.DataFrame(output_rows)
+    if "betrag" in result.columns:
+        result["betrag"] = pd.to_numeric(result["betrag"], errors="coerce")
+
+    print("[03_mieter_match] Match-Statistik:")
+    print(result["match_typ"].value_counts(dropna=False))
+    return result
+
+
+def main() -> None:
+    print("[03_mieter_match] Lade Daten...")
+
+    zahlungen = normalize_columns(load_csv(INPUT_DIR / "tbl_zahlung.csv"))
+    mietmatrix = normalize_columns(load_csv(INPUT_DIR / "mietmatrix.csv"))
+    tbl_mieter = normalize_columns(load_csv(INPUT_DIR / "Tbl_mieter.csv"))
+
+    required_zahlung = {"datum", "betrag", "buchungstext", "sollkonto", "habenkonto"}
+    required_mietmatrix = {"vertragid", "konto", "mieterid_1", "mieterid_2"}
+    required_mieter = {"mieterid", "mieter_name", "laden"}
+
+    if not required_zahlung.issubset(zahlungen.columns):
+        missing = required_zahlung.difference(set(zahlungen.columns))
+        raise ValueError(f"tbl_zahlung.csv unvollständig: {missing}")
+    if not required_mietmatrix.issubset(mietmatrix.columns):
+        missing = required_mietmatrix.difference(set(mietmatrix.columns))
+        raise ValueError(f"mietmatrix.csv unvollständig: {missing}")
+    if not required_mieter.issubset(tbl_mieter.columns):
+        missing = required_mieter.difference(set(tbl_mieter.columns))
+        raise ValueError(f"Tbl_mieter.csv unvollständig: {missing}")
+
+    result = run_matching(zahlungen, mietmatrix, tbl_mieter)
+
+    out_path = OUTPUT_DIR / "tbl_zahlung_mit_mieter.csv"
+    result.to_csv(out_path, index=False)
+    print(f"[03_mieter_match] Fertig: {out_path}")
+
+
 if __name__ == "__main__":
     main()
