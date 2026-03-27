@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 from rapidfuzz import fuzz
@@ -246,7 +247,17 @@ def main() -> None:
     ].copy()
 
     DATA_DIR.mkdir(exist_ok=True)
-    output.to_csv(OUTPUT_PATH, index=False)
+    written_path = OUTPUT_PATH
+    try:
+        output.to_csv(written_path, index=False)
+    except PermissionError:
+        fallback_name = f"{OUTPUT_PATH.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        written_path = OUTPUT_PATH.with_name(fallback_name)
+        output.to_csv(written_path, index=False)
+        print(
+            "[03_mieter_match] WARN: Ziel-Datei war gesperrt, schreibe stattdessen nach "
+            f"{written_path}"
+        )
 
     total = len(output)
     matched = int((output["match_typ"] != "none").sum())
@@ -255,7 +266,7 @@ def main() -> None:
     print(f"[03_mieter_match] Anzahl Gesamt: {total}")
     print(f"[03_mieter_match] Anzahl gematcht: {matched}")
     print(f"[03_mieter_match] Anzahl unmatched: {unmatched}")
-    print(f"[03_mieter_match] Datei geschrieben: {OUTPUT_PATH}")
+    print(f"[03_mieter_match] Datei geschrieben: {written_path}")
 
 
 if __name__ == "__main__":
