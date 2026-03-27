@@ -79,7 +79,7 @@ def normalize_konto(value: str) -> str:
 def is_mietkonto(konto) -> bool:
     try:
         return str(int(konto)).startswith("8")
-    except Exception:
+    except:
         return False
 
 
