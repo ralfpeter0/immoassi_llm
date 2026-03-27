@@ -59,3 +59,94 @@ class QueryEngine:
             return f"Geladene Zahlungen: {len(self.df_zahlung)}"
 
         return llm_response
+
+
+_ENGINE: QueryEngine | None = None
+
+
+def _get_engine() -> QueryEngine:
+    global _ENGINE
+    if _ENGINE is None:
+        _ENGINE = QueryEngine()
+        _ENGINE.load()
+    return _ENGINE
+
+
+def _filter_zeitraum(df: pd.DataFrame, zeitraum: str | None) -> pd.DataFrame:
+    if zeitraum is None or df.empty:
+        return df
+
+    if "monat" in df.columns:
+        return df[df["monat"].astype(str).str.startswith(str(zeitraum))]
+
+    if "datum" in df.columns:
+        work = df.copy()
+        work["_datum"] = pd.to_datetime(work["datum"], errors="coerce", dayfirst=True, format="mixed")
+        return work[work["_datum"].dt.year == int(zeitraum)].drop(columns=["_datum"])
+
+    return df
+
+
+def _filter_zahlungsart(df: pd.DataFrame, zahlungsart: str | None) -> pd.DataFrame:
+    if zahlungsart is None or df.empty:
+        return df
+
+    konto_map = {
+        "miete": {"8105", "8115"},
+        "nebenkosten": {"8195"},
+    }
+    allowed = konto_map.get(zahlungsart, set())
+    if not allowed:
+        return df
+
+    for col in ["konto", "zahlung_konto"]:
+        if col in df.columns:
+            return df[df[col].astype(str).isin(allowed)]
+
+    return df
+
+
+def _filter_mieter(df: pd.DataFrame, mieter: str | None) -> pd.DataFrame:
+    if mieter is None or df.empty:
+        return df
+
+    needle = str(mieter).strip().lower()
+    for col in ["mieter_name", "buchungstext", "mieterid"]:
+        if col in df.columns:
+            mask = df[col].astype(str).str.lower().str.contains(needle, na=False)
+            filtered = df[mask]
+            if not filtered.empty:
+                return filtered
+    return df.iloc[0:0]
+
+
+def execute_query(dialog_state: dict):
+    engine = _get_engine()
+    intent = dialog_state.get("intent")
+
+    if intent == "sum_miete":
+        df = engine.df_zahlung.copy()
+        df = _filter_mieter(df, dialog_state.get("mieter"))
+        df = _filter_zeitraum(df, dialog_state.get("zeitraum"))
+        df = _filter_zahlungsart(df, dialog_state.get("zahlungsart"))
+
+        if df.empty or "betrag" not in df.columns:
+            return 0.0
+
+        betraege = pd.to_numeric(df["betrag"], errors="coerce").fillna(0)
+        return float(betraege.sum())
+
+    if intent == "list_payments":
+        df = engine.df_zahlung.copy()
+        df = _filter_mieter(df, dialog_state.get("mieter"))
+        df = _filter_zeitraum(df, dialog_state.get("zeitraum"))
+        df = _filter_zahlungsart(df, dialog_state.get("zahlungsart"))
+        return df
+
+    if intent == "ist_soll":
+        df = engine.df_ist_soll.copy()
+        df = _filter_zeitraum(df, dialog_state.get("zeitraum"))
+        df = _filter_zahlungsart(df, dialog_state.get("zahlungsart"))
+        return df
+
+    return "Unbekannte Anfrage."
