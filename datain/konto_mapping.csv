@@ -1,0 +1,35 @@
+﻿Zweck;Konto;Bemerkung;Begriff 1;Begriff 2;Begriff 3;Begriff 4;Begriff 5;Begriff 6;Begriff 7;Begriff 8;Begriff 9
+Mieteinnahmen (steuerfrei, z. B. Wohnung);8105;Verbraucher (Wohnungen) manchmal in Verbindung Miete Betriebskostenvorauszahlung Stellplatz-Garage;Miete;Kaltmiete;Dauerauftrag;Mieteingang;Wohnung;Mietzahlung;SEPA;Gutschrift;
+Garagen und Stellplätze;8115;Verbraucher (Wohnungen) manchmal in Verbindung Miete Betriebskostenvorauszahlung Stellplatz-Garage;Stellplatz;Garage;Dauerauftrag;Stellplatzmiete;Wohnung;Miete;SEPA;Gutschrift;
+Nebenkosten-Vorauszahlung (steuerfrei);8195;Verbraucher (Wohnungen) manchmal in Verbindung Miete Betriebskostenvorauszahlung Stellplatz-Garage;Betriebskosten;Nebenkosten;Vorauszahlung;NK;Abschlag;VZ;;;
+Betriebskostenabrechnung;8197;Betriebskostenabrechnung vorjahr;Abrechnung;BK-Abrechnung;NK-Abrechnung;Nachzahlung;Guthaben;Saldo;Gutschrift;BK;
+Mieteinnahmen (mit 19 % USt, z. B. Gaststätte);8400;Erlöse 19 % USt – für USt-pflichtige Vermietung incl. Betriebskostenvorauszahlung;Augustiner;Wagner;Brauerei;Gaststätte;Volkartstrasse 2;;;;
+Nebenkosten-Vorauszahlung (mit USt);8401;BK 19 % USt – für USt-pflichtige Vermietung incl. Betriebskostenvorauszahlung;Augustiner;Wagner;Brauerei;Gaststätte;Volkartstrasse 2;;;;
+Betriebskostenabrechnung (Ust);8402;Betriebskosten vorjahr Brauerei;Augustiner;Wagner;Brauerei;Gaststätte;Volkartstrasse 2;;;;
+Variable Vergütung Bierpfennig;8403;nan;Augustiner;Wagner;Brauerei;Gaststätte;Volkartstrasse 2;;;;
+Kauf von Wertpapieren;1372;nan;Depot;Aktien;Kauf;Wertpapiere;Wertpapierkauf;Order;WKN;Fonds;
+Erhaltene Kautionen;1732;Passivkonto – keine Einnahme;Kaution;Mietsicherheit;Sicherheit;Kautionskonto;Mietkaution;Kautionszahlung;Sparbuch;;
+Privatentnahmen;1800;nan;Privat;Entnahme;Eigenbedarf;Privatnutzung;Bar;Privatentnahme;;;
+Kapitalertragsteuer 25%;2213;nan;KapESt;Steuer;Quellensteuer;Abgeltungsteuer;Finanzamt;Kapitalertrag;Kapitalertragsteuer;Abzug;Zinsabschlag
+Kapitalertrag;2650;nan;Zinsen;Dividende;Ertrag;AusschÃ¼ttung;Gutschrift;Zinsertrag;;;
+Hausmeisterleistungen;3100;Fremdleistungen – ggf. Unterkonto 'Hausmeister';Hausmeister;Service;Winterdienst;Gartenpflege;Objektbetreuung;Minijob;Proficlean;Reinigung;Objektpflege
+Gebäudereinigung;4250;Reinigungskosten, umlagefähig;Reinigung;Treppenhaus;Putzdienst;Hausreinigung;Fensterreinigung;Service;Hausflur;Glasreinigung;
+Heizkosten (zentrale Heizung);4230;Heizkosten zentraler Anlagen, umlagefähig;Stumbaum;Maingau;Heizung;Heizkosten;FernwÃ¤rme;Gas;Thura;Energie;
+Gas, Strom, Wasser (Allgemein);4240;Allgemeinstrom, Wasserverbrauch;Stadtwerke;Energie;Strom;Wasser;Versorger;Abschlag;Energieversorgung;;
+Gebäudeversicherungen;4360;Gebäude- und Haftpflichtversicherung;Versicherung;GebÃ¤ude;Haftpflicht;PrÃ¤mie;Sachversicherung;Beitrag;;;
+Müllabfuhr, Schornsteinfeger etc.;4290;Grundstücksaufwendungen – z. B. Müll, Schornstein;MÃ¼ll;Abfall;Schornsteinfeger;KehrgebÃ¼hr;Entsorgung;StraÃŸenreinigung;Grundsteuer;;
+Allgemeine Instandhaltung und Vermarktung;4260;Nicht umlagefähig – Werbungskosten;Instandhaltung;Reparatur;Wartung;Sanierung;Renovierung;Anzeige;;;
+Hausgeld ETW;4700;Vertriebskosten;Hausgeld;WEG;Verwalter;Vorauszahlung;Wohngeld;Abrechnung;Hausverwaltung;LÃ¤ÃŸ;
+Reparatur technischer Anlagen (z. B. Heizung);4800;Für Reparatur technischer Anlagen;Reparatur;Heizung;Aufzug;Wartung;Kessel;Anlage;Heizungsanlage;;
+Möbel, Einrichtung etc.;4805;Reparatur beweglicher Ausstattung;MÃ¶bel;Einrichtung;KÃ¼che;Inventar;Ausstattung;BÃ¼romÃ¶bel;;;
+Sofortabschreibung GWG < 800 € netto;4855;GWG sofort abschreibbar;GWG;Sofortabschreibung;BÃ¼robedarf;Anschaffung;Geringwertig;Kauf;;;
+Fahrzeugkosten;4500;FB-BR 119;KFZ;Benzin;Diesel;Leasing;Werkstatt;Versicherung;Auto;;
+Umsatzsteuer (aus Ausgangsrechnungen);1776;Automatisch bei Buchung auf 8400;Finanzamt;USt;Umsatzsteuer;Zahllast;Anmeldung;Mehrwertsteuer;;;
+Vorsteuer aus Eingangsrechnungen;1576;Nur bei USt-pflichtigen Einheiten;Vorsteuer;Eingangsrechnung;Abzug;Finanzamt;Erstattung;Steuer;;;
+Umsatzsteuer-Vorauszahlungen;1780;An das Finanzamt;Vorauszahlung;Finanzamt;USt-VZ;Steuer;Anmeldung;Zahlung;USt;;
+Prvate ESt, Soli, Kirche;1801;An das Finanzamt;Einkommensteuer;Soli;Kirchensteuer;Finanzamt;Steuer;Bescheid;Privat;;
+Zinsaufwendungen;2120;V2 Commerzbank;Commerzbank;Zinsen;Darlehen;Kreditzins;Sollzins;Bankzins;Zins;;
+Tilgungszahlung;3200;V2 Commerzbank;Tilgung;Darlehen;Rate;AnnuitÃ¤t;RÃ¼ckzahlung;Kredit;;;
+Deutsche Bank 01;1210;nan;Deutsche Bank;Umbuchung;Ãœbertrag;Transit;Geldtransfer;Eigen;;;
+HVB;1230;nan;Umbuchung;Ãœbertrag;Transit;Geldtransfer;HVB;HypoVereinsbank;;;
+Hausbank;1240;nan;Hausbank;Umbuchung;Ãœbertrag;Transit;Geldtransfer;EigenÃ¼bertrag;;;

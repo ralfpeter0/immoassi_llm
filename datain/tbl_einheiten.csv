@@ -1,0 +1,56 @@
+﻿einheitID;ObjektID;Bezeichnung;Wohnung;m2;KellerNummer
+1;2;V20/1;EG vorne rechts;81;1
+2;2;V20/2;EG mitte vorne rechts;58;2
+3;2;V20/3;EG mitte hinten links;80;3
+4;2;V20/4;EG hinten links;55;4
+5;2;V20/5;1.OG links;55;5
+6;2;V20/6;1.OG Mitte links;80;6
+7;2;V20/7;1.OG Mitte rechts;84;7
+8;2;V20/8;1.OG rechts;65;8
+9;2;V20/9;2.OG links;55;9
+10;2;V20/10;2.OG Mitte links;85;10
+11;2;V20/11;2.OG Mitte rechts;85;11
+12;2;V20/12;2.OG rechts;65;12
+13;2;V20/13;3.OG links;55;13
+14;2;V20/14;3.OG Mitte links;85;14
+15;2;V20/15;3.OG Mitte rechts;86;15
+16;2;V20/16;3.OG rechts;65;16
+17;2;V20/17;4.OG;85;17
+18;2;V20/18;RGB rechts;30;18
+19;2;V20/19;RGB links;37;19
+20;2;V20/20;Garage 1;;20
+21;2;V20/21;Garage 2;;21
+22;2;V20/22;Garage 3;;22
+23;2;V20/23;Garage 4;;23
+24;2;V20/24;Garage 5;;24
+25;2;V20/25;Garage 6;;25
+26;2;V20/26;Stellplatz 1;;26
+27;2;V20/27;Stellplatz 2;;27
+28;2;V20/28;Stellplatz 3;;28
+29;2;V20/29;Stellplatz 4;;29
+30;2;V20/30;Stellplatz 5;;30
+31;2;V20/31;Stellplatz 6;;31
+32;2;V20/32;Stellplatz 7;;32
+33;4;Germ/1;Etagenwohnung;38;33
+34;3;Heu/1;EG links;72;34
+35;3;Heu/2;EG rechts;72;35
+36;3;Heu/3;1.OG links;72;36
+37;3;Heu/4;1.OG rechts;72;37
+38;3;Heu/5;DG/links;69;38
+39;3;Heu/6;DG/rechts;69;39
+40;3;Heu/7;Stellplatz;;40
+41;3;Heu/8;Garage 1;;41
+42;3;Heu/9;Garage 2;;42
+43;3;Heu/10;Garage 3;;43
+44;1;V2/1;Wirtschaft;350;44
+45;1;V2/2;1.OG links;108;45
+46;1;V2/3;1.OG mitte;82;46
+47;1;V2/4;1.OG rechts;93;47
+48;1;V2/5;2.OG links;87;48
+49;1;V2/6;2.OG mitte;108;49
+50;1;V2/7;2.OG rechts;96;50
+51;1;V2/8;3.OG links;88;51
+52;1;V2/9;3.OG mitte;108;52
+54;1;V2/11;4.OG links;33;54
+55;1;V2/12;4.OG links;67;55
+56;1;V2/13;4.OG rechts;81;56
