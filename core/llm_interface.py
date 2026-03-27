@@ -98,6 +98,10 @@ class EchoLLM:
 
 
 def _extract_intent(text: str) -> str | None:
+    if any(token in text for token in ["wohnt", "wo wohnt", "mieter anzeigen", "zeige mieter"]):
+        return "mieter_info"
+    if "zeige mir" in text and not any(token in text for token in ["zahlung", "zahlungen"]):
+        return "mieter_info"
     if any(token in text for token in ["ist soll", "rückstand", "rueckstand", "offen", "differenz"]):
         return "ist_soll"
     if any(token in text for token in ["zeige", "liste", "alle", "zahlungen"]):
@@ -108,6 +112,8 @@ def _extract_intent(text: str) -> str | None:
 
 
 def _extract_output_format(text: str) -> str | None:
+    if _extract_intent(text) == "mieter_info":
+        return "table"
     if "als tabelle" in text:
         return "table"
     if any(token in text for token in ["zeige", "liste", "alle"]):
@@ -125,8 +131,8 @@ def _extract_zeitraum(text: str) -> str | None:
 
 
 def _extract_zahlungsart(text: str) -> str | None:
-    has_miete = "miete" in text
-    has_nk = any(token in text for token in ["nebenkosten", "betriebskosten", "bk"])
+    has_miete = re.search(r"\bmiete\b", text) is not None
+    has_nk = any(re.search(rf"\b{token}\b", text) is not None for token in ["nebenkosten", "betriebskosten", "bk"])
 
     if has_miete and not has_nk:
         return "miete"
@@ -137,6 +143,22 @@ def _extract_zahlungsart(text: str) -> str | None:
 
 def _extract_mieter(raw_text: str) -> str | None:
     text = raw_text.strip()
+
+    wo_wohnt_match = re.search(r"\bwo\s+wohnt\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
+    if wo_wohnt_match:
+        return wo_wohnt_match.group(1)
+
+    wohnt_match = re.search(r"\bwohnt\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
+    if wohnt_match:
+        return wohnt_match.group(1)
+
+    zeige_match = re.search(
+        r"\bzeige(?:\s+mir)?\s+(?:mieter\s+)?([A-Za-zÄÖÜäöüß-]+)",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+    if zeige_match and zeige_match.group(1).lower() not in {"zahlung", "zahlungen", "liste", "alle"}:
+        return zeige_match.group(1)
 
     context_match = re.search(r"\b(?:von|für|fuer)\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
     if context_match:
@@ -178,7 +200,9 @@ def interpret_query(user_text: str) -> dict:
 
     if state["intent"] is None:
         state["intent"] = "sum_miete"
-    if state["output_format"] is None:
+    if state["intent"] == "mieter_info":
+        state["output_format"] = "table"
+    elif state["output_format"] is None:
         state["output_format"] = "value" if state["intent"] == "sum_miete" else "table"
 
     return state
