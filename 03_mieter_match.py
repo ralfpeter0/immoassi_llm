@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from datetime import datetime
 
 import pandas as pd
 from rapidfuzz import fuzz
@@ -75,30 +76,24 @@ def normalize_konto(value: str) -> str:
     return konto
 
 
-def _pick_8xxx_konto(df: pd.DataFrame) -> pd.Series:
-    soll = df["sollkonto"].fillna("").astype(str).str.strip()
-    haben = df["habenkonto"].fillna("").astype(str).str.strip()
+def is_mietkonto(konto) -> bool:
+    try:
+        return str(int(konto)).startswith("8")
+    except Exception:
+        return False
 
-    haben_is_8 = haben.str.match(r"^8\d{3,}$")
-    soll_is_8 = soll.str.match(r"^8\d{3,}$")
 
-    # Priorität: Habenkonto, danach Sollkonto.
-    konto = haben.where(haben_is_8, "")
-    konto = konto.mask(konto.eq("") & soll_is_8, soll)
+def choose_zahlungskonto(sollkonto, habenkonto) -> str:
+    sollkonto = normalize_konto(sollkonto)
+    habenkonto = normalize_konto(habenkonto)
+
+    if is_mietkonto(sollkonto):
+        konto = sollkonto
+    elif is_mietkonto(habenkonto):
+        konto = habenkonto
+    else:
+        return ""
     return konto
-
-
-def konto_filter(zahlungen: pd.DataFrame) -> pd.DataFrame:
-    """Filtert ausschließlich relevante 8xxx-Buchungen (Pflichtschritt 1)."""
-    required = {"datum", "betrag", "buchungstext", "sollkonto", "habenkonto"}
-    missing = required.difference(set(zahlungen.columns))
-    if missing:
-        raise ValueError(f"tbl_zahlung.csv unvollständig, fehlende Spalten: {sorted(missing)}")
-
-    out = zahlungen.copy()
-    out["zahlung_konto"] = _pick_8xxx_konto(out)
-    out = out[out["zahlung_konto"].str.match(r"^8\d{3,}$", na=False)].copy()
-    return out
 
 
 def _build_mieter_candidates(mieter: pd.DataFrame) -> pd.DataFrame:
@@ -204,8 +199,22 @@ def find_vertrag(mieterid: str, konto: str, lookup: dict[tuple[str, str], str]) 
 def main() -> None:
     zahlungen, mietmatrix, mieter = load_data()
 
-    # 1) Pflichtschritt: nur relevante 8xxx-Buchungen
-    relevante_zahlungen = konto_filter(zahlungen)
+    required = {"datum", "betrag", "buchungstext", "sollkonto", "habenkonto"}
+    missing = required.difference(set(zahlungen.columns))
+    if missing:
+        raise ValueError(f"tbl_zahlung.csv unvollständig, fehlende Spalten: {sorted(missing)}")
+
+    zahlungen = zahlungen[
+        zahlungen.apply(
+            lambda row: is_mietkonto(row.get("sollkonto")) or is_mietkonto(row.get("habenkonto")),
+            axis=1,
+        )
+    ].copy()
+    zahlungen["zahlung_konto"] = zahlungen.apply(
+        lambda row: choose_zahlungskonto(row.get("sollkonto"), row.get("habenkonto")),
+        axis=1,
+    )
+    print(f"[03_mieter_match] Relevante Zahlungen (8xxx): {len(zahlungen)}")
 
     mieter_candidates = _build_mieter_candidates(mieter)
     candidate_map = (
@@ -213,7 +222,7 @@ def main() -> None:
     )
     vertrag_lookup = _build_vertrag_lookup(mietmatrix)
 
-    working = relevante_zahlungen.copy()
+    working = zahlungen.copy()
     working["text_norm"] = working["buchungstext"].map(normalize_text)
 
     matches = working["text_norm"].map(lambda text: find_mieter(text, candidate_map))
@@ -238,7 +247,17 @@ def main() -> None:
     ].copy()
 
     DATA_DIR.mkdir(exist_ok=True)
-    output.to_csv(OUTPUT_PATH, index=False)
+    written_path = OUTPUT_PATH
+    try:
+        output.to_csv(written_path, index=False)
+    except PermissionError:
+        fallback_name = f"{OUTPUT_PATH.stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        written_path = OUTPUT_PATH.with_name(fallback_name)
+        output.to_csv(written_path, index=False)
+        print(
+            "[03_mieter_match] WARN: Ziel-Datei war gesperrt, schreibe stattdessen nach "
+            f"{written_path}"
+        )
 
     total = len(output)
     matched = int((output["match_typ"] != "none").sum())
@@ -247,7 +266,7 @@ def main() -> None:
     print(f"[03_mieter_match] Anzahl Gesamt: {total}")
     print(f"[03_mieter_match] Anzahl gematcht: {matched}")
     print(f"[03_mieter_match] Anzahl unmatched: {unmatched}")
-    print(f"[03_mieter_match] Datei geschrieben: {OUTPUT_PATH}")
+    print(f"[03_mieter_match] Datei geschrieben: {written_path}")
 
 
 if __name__ == "__main__":
