@@ -6,6 +6,16 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+_ALLOWED_STEP_TYPES = {
+    "filter_mieter",
+    "filter_year",
+    "group_by_konto",
+    "map_konto",
+    "aggregate_sum",
+    "output",
+}
+
+
 class LLMClient(Protocol):
     def generate(self, prompt: str) -> str:
         """Generiert eine Antwort für einen Prompt."""
@@ -15,194 +25,87 @@ class LLMClient(Protocol):
 class EchoLLM:
     """Lokaler Fallback ohne externe API-Abhängigkeit.
 
-    Der Fallback antwortet im JSON-Format und erzwingt Rückfragen,
-    wenn kritische Informationen fehlen.
+    Gibt immer ein JSON-Objekt mit `plan` zurück.
     """
 
-    def _extract_date_range(self, text: str) -> str | None:
-        patterns = [
-            r"\b\d{1,2}\.\d{1,2}\.\d{2,4}\b",
-            r"\b\d{4}-\d{2}-\d{2}\b",
-            r"\b(januar|februar|märz|maerz|april|mai|juni|juli|august|september|oktober|november|dezember)\b",
-            r"\b\d{4}\b",
-            r"\b(von|bis|zwischen|seit|im|monat|quartal|jahr|zeitraum)\b",
-        ]
-        if any(re.search(pattern, text) for pattern in patterns):
-            return "angegeben"
-        return None
-
-    def _extract_payment_type(self, text: str) -> str | None:
-        has_miete = "miete" in text
-        has_nebenkosten = any(term in text for term in ["nebenkosten", "betriebskosten", "bk"])
-
-        if has_miete and not has_nebenkosten:
-            return "miete"
-        if has_nebenkosten and not has_miete:
-            return "nebenkosten"
-        if has_miete and has_nebenkosten:
-            return "mehrdeutig"
-        return None
-
-    def _extract_tenant(self, prompt: str) -> str | None:
-        match = re.search(r"\b(?:hat|von|für|fuer)\s+([A-ZÄÖÜ][\wÄÖÜäöüß-]+)", prompt)
-        if match:
-            return match.group(1)
-        match = re.search(r"\b([A-ZÄÖÜ][\wÄÖÜäöüß-]+)\s+bezahlt", prompt)
-        if match:
-            return match.group(1)
-        return None
-
     def generate(self, prompt: str) -> str:
-        text = prompt.lower().strip()
-        date_range = self._extract_date_range(text)
-        payment_type = self._extract_payment_type(text)
-
-        multiple_entities = any(token in text for token in [" und ", ",", " sowie "])
-        ambiguous_request = not any(token in text for token in ["wie viel", "summe", "bezahlt", "zahlung"])
-
-        need_clarification = False
-        question = ""
-
-        if date_range is None:
-            need_clarification = True
-            question = "Für welchen Zeitraum soll die Berechnung erfolgen?"
-
-        if payment_type in (None, "mehrdeutig"):
-            need_clarification = True
-            if not question:
-                question = "Meinst du Miete oder Nebenkosten?"
-
-        if multiple_entities:
-            need_clarification = True
-            if not question:
-                question = "Ich habe mehrere passende Einträge gefunden. Welchen genau meinst du?"
-
-        if ambiguous_request:
-            need_clarification = True
-            if not question:
-                question = "Kannst du deine Anfrage genauer formulieren?"
-
-        intent = "unknown"
-        if payment_type == "miete":
-            intent = "sum_miete"
-        elif payment_type == "nebenkosten":
-            intent = "sum_nebenkosten"
-
-        response = {
-            "intent": intent,
-            "mieter": self._extract_tenant(prompt),
-            "need_clarification": need_clarification,
-            "question": question,
-        }
+        response = interpret_query(prompt)
         return json.dumps(response, ensure_ascii=False)
 
 
-def _extract_intent(text: str) -> str | None:
-    if any(token in text for token in ["wohnt", "wo wohnt", "mieter anzeigen", "zeige mieter"]):
-        return "mieter_info"
-    if "zeige mir" in text and not any(token in text for token in ["zahlung", "zahlungen"]):
-        return "mieter_info"
-    if any(token in text for token in ["ist soll", "rückstand", "rueckstand", "offen", "differenz"]):
-        return "ist_soll"
-    if any(token in text for token in ["zeige", "liste", "alle", "zahlungen"]):
-        return "list_payments"
-    if any(token in text for token in ["wie viel", "summe", "zahlt", "bezahlt"]):
-        return "sum_miete"
-    return None
-
-
-def _extract_output_format(text: str) -> str | None:
-    if _extract_intent(text) == "mieter_info":
-        return "table"
-    if "als tabelle" in text:
-        return "table"
-    if any(token in text for token in ["zeige", "liste", "alle"]):
-        return "table"
-    if any(token in text for token in ["wie viel", "summe"]):
-        return "value"
-    return None
-
-
-def _extract_zeitraum(text: str) -> str | None:
-    match = re.search(r"\b(20\d{2}|19\d{2})\b", text)
+def _extract_year(text: str) -> int | None:
+    match = re.search(r"\b(19\d{2}|20\d{2})\b", text)
     if match:
-        return match.group(1)
-    return None
-
-
-def _extract_zahlungsart(text: str) -> str | None:
-    has_miete = re.search(r"\bmiete\b", text) is not None
-    has_nk = any(re.search(rf"\b{token}\b", text) is not None for token in ["nebenkosten", "betriebskosten", "bk"])
-
-    if has_miete and not has_nk:
-        return "miete"
-    if has_nk and not has_miete:
-        return "nebenkosten"
+        return int(match.group(1))
     return None
 
 
 def _extract_mieter(raw_text: str) -> str | None:
-    text = raw_text.strip()
-
-    wo_wohnt_match = re.search(r"\bwo\s+wohnt\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
-    if wo_wohnt_match:
-        return wo_wohnt_match.group(1)
-
-    wohnt_match = re.search(r"\bwohnt\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
-    if wohnt_match:
-        return wohnt_match.group(1)
-
-    zeige_match = re.search(
-        r"\bzeige(?:\s+mir)?\s+(?:mieter\s+)?([A-Za-zÄÖÜäöüß-]+)",
-        raw_text,
-        flags=re.IGNORECASE,
-    )
-    if zeige_match and zeige_match.group(1).lower() not in {"zahlung", "zahlungen", "liste", "alle"}:
-        return zeige_match.group(1)
-
-    context_match = re.search(r"\b(?:von|für|fuer)\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
-    if context_match:
-        return context_match.group(1)
-
-    zahlt_match = re.search(r"zahlt\s+([A-Za-zÄÖÜäöüß-]+)", raw_text, flags=re.IGNORECASE)
-    if zahlt_match:
-        return zahlt_match.group(1)
-
-    if re.fullmatch(r"[A-Za-zÄÖÜäöüß-]+", text):
-        return text
-
+    patterns = [
+        r"\b(?:von|für|fuer)\s+([A-Za-zÄÖÜäöüß-]+)",
+        r"\b([A-Za-zÄÖÜäöüß-]+)\s+bezahlt",
+        r"\b([A-Za-zÄÖÜäöüß-]+)\s+202\d\b",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, raw_text, flags=re.IGNORECASE)
+        if match:
+            return match.group(1).strip().title()
     return None
 
 
-def extract_slot_updates(user_text: str) -> dict:
+def _extract_output_format(text: str) -> str:
+    if any(token in text for token in ["zeige", "liste", "und", "tabelle"]):
+        return "table"
+    return "value"
+
+
+def _build_plan(user_text: str) -> list[dict]:
     text = user_text.lower().strip()
-    updates = {
-        "intent": _extract_intent(text),
-        "mieter": _extract_mieter(user_text),
-        "zeitraum": _extract_zeitraum(text),
-        "zahlungsart": _extract_zahlungsart(text),
-        "output_format": _extract_output_format(text),
-    }
-    return {k: v for k, v in updates.items() if v is not None}
+    plan: list[dict] = []
+
+    mieter = _extract_mieter(user_text)
+    year = _extract_year(text)
+
+    if mieter:
+        plan.append({"type": "filter_mieter", "value": mieter})
+    if year is not None:
+        plan.append({"type": "filter_year", "value": year})
+
+    plan.extend(
+        [
+            {"type": "group_by_konto"},
+            {"type": "map_konto"},
+            {"type": "aggregate_sum"},
+            {"type": "output", "format": _extract_output_format(text)},
+        ]
+    )
+    return plan
+
+
+def _is_valid_plan(plan: list[dict]) -> bool:
+    if not isinstance(plan, list) or not plan:
+        return False
+
+    for step in plan:
+        if not isinstance(step, dict):
+            return False
+        step_type = step.get("type")
+        if step_type not in _ALLOWED_STEP_TYPES:
+            return False
+
+        if step_type == "filter_mieter" and not isinstance(step.get("value"), str):
+            return False
+        if step_type == "filter_year" and not isinstance(step.get("value"), int):
+            return False
+        if step_type == "output" and step.get("format") not in {"table", "value"}:
+            return False
+
+    return True
 
 
 def interpret_query(user_text: str) -> dict:
-    """Erstinterpretation einer kompletten Benutzeranfrage."""
-    state = {
-        "intent": None,
-        "mieter": None,
-        "zeitraum": None,
-        "zahlungsart": None,
-        "output_format": None,
-    }
-    for key, value in extract_slot_updates(user_text).items():
-        state[key] = value
-
-    if state["intent"] is None:
-        state["intent"] = "sum_miete"
-    if state["intent"] == "mieter_info":
-        state["output_format"] = "table"
-    elif state["output_format"] is None:
-        state["output_format"] = "value" if state["intent"] == "sum_miete" else "table"
-
-    return state
+    """Interpretation einer Benutzeranfrage als strikt strukturierten Plan."""
+    plan = _build_plan(user_text)
+    if not _is_valid_plan(plan):
+        return {"plan": []}
+    return {"plan": plan}
