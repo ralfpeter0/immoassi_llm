@@ -49,6 +49,22 @@ def _format_value(value: str) -> str:
         return value
 
 
+def extract_filters(plan) -> dict:
+    filters = {}
+
+    for step in plan:
+        if step["type"] == "filter_mieter":
+            filters["mieter"] = step["value"]
+
+        if step["type"] == "filter_year":
+            filters["jahr"] = step["value"]
+
+        if step["type"] == "map_konto":
+            filters["konten"] = ["Miete", "Nebenkosten"]
+
+    return filters
+
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         if "dataframe" in message:
@@ -57,6 +73,7 @@ for message in st.session_state.messages:
             st.write(message["content"])
 
 prompt = st.chat_input("Frage zu Mieten, Zahlungen oder Differenzen")
+show_debug = st.checkbox("Debug anzeigen")
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -73,6 +90,18 @@ if prompt:
     assistant_text, assistant_df = _normalize_result(result)
 
     with st.chat_message("assistant"):
+        if show_debug and "plan" in response:
+            with st.expander("🔍 Plan anzeigen"):
+                st.json(response["plan"])
+
+            with st.expander("📊 Interpretation"):
+                st.json(
+                    {
+                        "plan": response["plan"],
+                        "filters": extract_filters(response["plan"]),
+                    }
+                )
+
         if assistant_df is not None:
             st.dataframe(assistant_df)
             st.session_state.messages.append(
