@@ -1,18 +1,23 @@
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 
 _ALLOWED_STEP_TYPES = {
     "filter_mieter",
     "filter_year",
+    "filter_konto",
     "group_by_konto",
     "map_konto",
     "aggregate_sum",
     "output",
+}
+
+_KONTO_LABEL_TO_NUMBERS = {
+    "miete": [8105, 8400],
+    "nebenkosten": [8195],
 }
 
 
@@ -23,66 +28,70 @@ class LLMClient(Protocol):
 
 @dataclass
 class EchoLLM:
-    """Lokaler Fallback ohne externe API-Abhängigkeit.
-
-    Gibt immer ein JSON-Objekt mit `plan` zurück.
-    """
+    """Lokaler Fallback ohne externe API-Abhängigkeit."""
 
     def generate(self, prompt: str) -> str:
-        response = interpret_query(prompt)
-        return json.dumps(response, ensure_ascii=False)
+        return str(interpret_query(prompt))
 
 
-def _extract_year(text: str) -> int | None:
+def _extract_year(text: str) -> str | None:
     match = re.search(r"\b(19\d{2}|20\d{2})\b", text)
     if match:
-        return int(match.group(1))
+        return match.group(1)
     return None
 
 
 def _extract_mieter(raw_text: str) -> str | None:
     patterns = [
-        r"\b(?:von|für|fuer)\s+([A-Za-zÄÖÜäöüß-]+)",
+        r"\b(?:von|für|fuer|hat)\s+([A-Za-zÄÖÜäöüß-]+)",
         r"\b([A-Za-zÄÖÜäöüß-]+)\s+bezahlt",
-        r"\b([A-Za-zÄÖÜäöüß-]+)\s+202\d\b",
     ]
     for pattern in patterns:
         match = re.search(pattern, raw_text, flags=re.IGNORECASE)
         if match:
-            return match.group(1).strip().title()
+            candidate = match.group(1).strip()
+            if candidate.lower() not in {"miete", "nebenkosten", "zahlung"}:
+                return candidate.title()
     return None
 
 
-def _extract_output_format(text: str) -> str:
-    if any(token in text for token in ["zeige", "liste", "und", "tabelle"]):
-        return "table"
-    return "value"
+def _extract_konten(text: str) -> list[str] | None:
+    result: list[str] = []
+    if "miete" in text:
+        result.append("Miete")
+    if "nebenkosten" in text:
+        result.append("Nebenkosten")
+    return result or None
 
 
-def _build_plan(user_text: str) -> list[dict]:
-    text = user_text.lower().strip()
-    plan: list[dict] = []
+def _konto_numbers(konten: list[str]) -> list[int]:
+    numbers: list[int] = []
+    for konto in konten:
+        values = _KONTO_LABEL_TO_NUMBERS.get(konto.lower(), [])
+        for value in values:
+            if value not in numbers:
+                numbers.append(value)
+    return numbers
 
-    mieter = _extract_mieter(user_text)
-    year = _extract_year(text)
 
-    if mieter:
-        plan.append({"type": "filter_mieter", "value": mieter})
-    if year is not None:
-        plan.append({"type": "filter_year", "value": year})
+def _build_plan(filters: dict[str, Any]) -> list[dict[str, Any]]:
+    konten = filters.get("konten") or []
+    year = filters.get("zeitraum")
+    mieter = filters.get("mieter")
 
-    plan.extend(
-        [
-            {"type": "group_by_konto"},
-            {"type": "map_konto"},
-            {"type": "aggregate_sum"},
-            {"type": "output", "format": _extract_output_format(text)},
-        ]
-    )
+    plan = [
+        {"type": "filter_mieter", "value": mieter},
+        {"type": "filter_year", "value": int(year)},
+        {"type": "filter_konto", "value": _konto_numbers(konten)},
+        {"type": "group_by_konto"},
+        {"type": "map_konto"},
+        {"type": "aggregate_sum"},
+        {"type": "output", "format": "table"},
+    ]
     return plan
 
 
-def _is_valid_plan(plan: list[dict]) -> bool:
+def _is_valid_plan(plan: list[dict[str, Any]]) -> bool:
     if not isinstance(plan, list) or not plan:
         return False
 
@@ -97,15 +106,71 @@ def _is_valid_plan(plan: list[dict]) -> bool:
             return False
         if step_type == "filter_year" and not isinstance(step.get("value"), int):
             return False
+        if step_type == "filter_konto" and not isinstance(step.get("value"), list):
+            return False
         if step_type == "output" and step.get("format") not in {"table", "value"}:
             return False
 
     return True
 
 
-def interpret_query(user_text: str) -> dict:
-    """Interpretation einer Benutzeranfrage als strikt strukturierten Plan."""
-    plan = _build_plan(user_text)
-    if not _is_valid_plan(plan):
-        return {"plan": []}
-    return {"plan": plan}
+def interpret_query(user_text: str, context_filters: dict[str, Any] | None = None) -> dict[str, Any]:
+    text = user_text.lower().strip()
+    context_filters = context_filters or {}
+
+    extracted_filters = {
+        "mieter": _extract_mieter(user_text),
+        "konten": _extract_konten(text),
+        "zeitraum": _extract_year(text),
+    }
+
+    filters = {
+        "mieter": extracted_filters["mieter"] or context_filters.get("mieter"),
+        "konten": extracted_filters["konten"] or context_filters.get("konten"),
+        "zeitraum": extracted_filters["zeitraum"] or context_filters.get("zeitraum"),
+    }
+
+    missing: list[str] = []
+    for key in ["mieter", "konten", "zeitraum"]:
+        if not filters.get(key):
+            missing.append(key)
+
+    understanding_parts = []
+    if filters["mieter"]:
+        understanding_parts.append(f"Zahlungen von {filters['mieter']}")
+    else:
+        understanding_parts.append("Zahlungen eines Mieters")
+
+    if filters["konten"]:
+        understanding_parts.append(f"für {', '.join(filters['konten'])}")
+    if filters["zeitraum"]:
+        understanding_parts.append(f"im Zeitraum {filters['zeitraum']}")
+
+    clarification = None
+    plan = None
+
+    if missing:
+        questions = {
+            "mieter": "Für welchen Mieter soll ich suchen?",
+            "konten": "Meinst du Miete oder Nebenkosten?",
+            "zeitraum": "Für welchen Zeitraum soll ich suchen?",
+        }
+        clarification = " ".join(questions[field] for field in missing)
+    else:
+        plan = _build_plan(filters)
+        if not _is_valid_plan(plan):
+            return {
+                "understanding": "Anfrage konnte nicht sicher interpretiert werden",
+                "missing": ["plan"],
+                "filters": filters,
+                "plan": None,
+                "clarification": "Bitte formuliere die Anfrage noch einmal.",
+            }
+
+    return {
+        "understanding": "; ".join(understanding_parts),
+        "missing": missing,
+        "filters": filters,
+        "plan": plan,
+        "clarification": clarification,
+    }

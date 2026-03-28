@@ -11,16 +11,11 @@ ZAHLUNG_PATH = DATAOUT_DIR / "tbl_zahlung_mit_mieter.csv"
 ALLOWED_STEP_TYPES = {
     "filter_mieter",
     "filter_year",
+    "filter_konto",
     "group_by_konto",
     "map_konto",
     "aggregate_sum",
     "output",
-}
-
-KONTO_TYP_MAPPING = {
-    "8105": "Miete",
-    "8400": "Miete",
-    "8195": "Nebenkosten",
 }
 
 
@@ -36,12 +31,6 @@ class QueryEngine:
             print(f"[query_engine] geladen: {ZAHLUNG_PATH}")
         else:
             print(f"[query_engine] fehlt: {ZAHLUNG_PATH}")
-
-
-def _load_zahlung_data() -> pd.DataFrame:
-    if not ZAHLUNG_PATH.exists():
-        return pd.DataFrame()
-    return pd.read_csv(ZAHLUNG_PATH)
 
 
 def _validate_plan(plan) -> bool:
@@ -60,6 +49,8 @@ def _validate_plan(plan) -> bool:
             return False
         if step_type == "filter_year" and not isinstance(step.get("value"), int):
             return False
+        if step_type == "filter_konto" and not isinstance(step.get("value"), list):
+            return False
         if step_type == "output" and step.get("format") not in {"table", "value"}:
             return False
 
@@ -70,48 +61,44 @@ def execute_plan(plan):
     if not _validate_plan(plan):
         return "Fehler im Plan"
 
-    df = _load_zahlung_data()
-    if df.empty:
+    if not ZAHLUNG_PATH.exists():
         return "Fehler im Plan"
 
-    grouped_df = pd.DataFrame()
-    aggregated_df = pd.DataFrame()
+    df = pd.read_csv(ZAHLUNG_PATH)
 
     for step in plan:
         step_type = step["type"]
 
         if step_type == "filter_mieter":
-            mieter = step["value"]
-            df = df[df["buchungstext"].astype(str).str.contains(mieter, case=False, na=False)]
+            df = df[df["buchungstext"].astype(str).str.contains(step["value"], case=False, na=False)]
 
         elif step_type == "filter_year":
-            year = step["value"]
-            work = df.copy()
-            work["_datum"] = pd.to_datetime(work["datum"], errors="coerce", dayfirst=True, format="mixed")
-            df = work[work["_datum"].dt.year == year].drop(columns=["_datum"])
+            df["datum"] = pd.to_datetime(df["datum"], errors="coerce", dayfirst=True, format="mixed")
+            df = df[df["datum"].dt.year == int(step["value"])]
+
+        elif step_type == "filter_konto":
+            df = df[df["zahlung_konto"].isin(step["value"])]
 
         elif step_type == "group_by_konto":
-            grouped_df = df.groupby("zahlung_konto", as_index=False)["betrag"].sum()
+            df = df.groupby("zahlung_konto")["betrag"].sum().reset_index()
 
         elif step_type == "map_konto":
-            source = grouped_df if not grouped_df.empty else df
-            work = source.copy()
-            work["typ"] = work["zahlung_konto"].astype(str).map(KONTO_TYP_MAPPING)
-            grouped_df = work.dropna(subset=["typ"])
+            mapping = {
+                8105: "Miete",
+                8400: "Miete",
+                8195: "Nebenkosten",
+            }
+            df["typ"] = df["zahlung_konto"].map(mapping)
 
         elif step_type == "aggregate_sum":
-            source = grouped_df if not grouped_df.empty else df
-            aggregated_df = source.groupby("typ", as_index=False)["betrag"].sum()
+            df = df.groupby("typ")["betrag"].sum().reset_index()
 
         elif step_type == "output":
-            output_format = step["format"]
-            source = aggregated_df if not aggregated_df.empty else grouped_df
+            if step["format"] == "table":
+                return df
+            if step["format"] == "value":
+                if "betrag" in df.columns:
+                    return pd.to_numeric(df["betrag"], errors="coerce").fillna(0).sum()
+                return 0.0
 
-            if output_format == "table":
-                return source
-            if output_format == "value":
-                if source.empty:
-                    return 0.0
-                return float(pd.to_numeric(source["betrag"], errors="coerce").fillna(0).sum())
-
-    return "Fehler im Plan"
+    return df
